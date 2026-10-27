@@ -1,0 +1,122 @@
+# Fork-only workflow (aien-dev/compiler-explorer). Not part of the upstream pull request.
+# "test" and "build_minimum_support" mirror test-and-deploy.yml (without codecov), because workflows
+# inherited from upstream are not registered on this fork. "omega_arm64" runs the real omc on AArch64.
+name: Omega fork CI
+
+on: [push, workflow_dispatch]
+
+jobs:
+  test:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22.x
+          check-latest: true
+          cache: npm
+      - name: Install prerequisites
+        run: |
+          make prereqs
+          python3 -m pip install numba
+      - uses: astral-sh/setup-uv@v10.2.0
+      - name: Run checks
+        run: |
+          npm run lint-check
+          npm run check-license-headers
+          npm run test
+          npm run ts-check
+          python3 ./etc/scripts/test_numba_wrapper.py
+          uv run --directory etc/scripts/gh_tool pytest -v
+
+  build_minimum_support:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .minimum-node-version
+          check-latest: false
+          cache: npm
+      - run: npm i
+      - run: |
+          npm run ts-compile
+          npm run webpack
+
+  omega_arm64:
+    runs-on: ubuntu-24.04-arm
+    env:
+      OMEGA_MV_COMMIT: e5b32567a7aff3ce594e3254a622a846a6cd190b
+      OMC_SHA256: 2c82480596bbdc50cda9626866209ef662d5834f278f839ff4ce0250c495029f
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22.x
+          check-latest: true
+          cache: npm
+      - name: Fetch pinned omc
+        run: |
+          mkdir -p /tmp/omega
+          curl -fsSL -o /tmp/omega/omc "https://raw.githubusercontent.com/aien-dev/omega-mv/${OMEGA_MV_COMMIT}/seed/out/omc"
+          echo "${OMC_SHA256}  /tmp/omega/omc" | sha256sum --check --strict -
+          chmod 755 /tmp/omega/omc
+          uname -m
+      - run: npm ci
+      - name: Omega unit tests
+        run: npx vitest run test/omega-tests.ts test/lang-tests.ts
+      - name: Start Compiler Explorer with the real omc
+        run: |
+          printf 'compilers=&omega\ngroup.omega.compilers=omc\ncompiler.omc.exe=/tmp/omega/omc\n' > etc/config/omega.local.properties
+          NODE_ENV=production nohup node --no-warnings=ExperimentalWarning --import=tsx app.ts \
+            --language omega --port 10240 --env dev > /tmp/ce.log 2>&1 &
+          for i in $(seq 1 120); do
+            curl -fs http://127.0.0.1:10240/api/compilers/omega && break
+            sleep 2
+          done
+          curl -fs 'http://127.0.0.1:10240/api/languages' | tee /tmp/languages.txt
+          grep -q '^omega *| Omega' /tmp/languages.txt
+      - name: Example compiles, disassembles and runs
+        run: |
+          jq -n --rawfile src examples/omega/default.om \
+            '{source: $src, lang: "omega", options: {userArguments: "", filters: {binary: true, execute: true}, compilerOptions: {}}}' \
+            > /tmp/good.json
+          curl -fs -H 'Content-Type: application/json' -H 'Accept: application/json' \
+            -d @/tmp/good.json http://127.0.0.1:10240/api/compiler/omc/compile > /tmp/good.out
+          jq '{code, stderr, asmLines: (.asm | length), firstAsm: [.asm[:6][].text], exec: .execResult | {code, stdout, didExecute}}' /tmp/good.out
+          test "$(jq '.code' /tmp/good.out)" = 0
+          jq -e '[.asm[].text] | any(test("\\bmul\\b"))' /tmp/good.out
+          test "$(jq -r '[.execResult.stdout[].text] | join("\n")' /tmp/good.out)" = 385
+          test "$(jq '.execResult.code' /tmp/good.out)" = 0
+      - name: Negative control - omc error is shown and nothing runs
+        run: |
+          printf 'fn main to int\nx = frob 1\nret 0\nend\n' > /tmp/bad.om
+          jq -n --rawfile src /tmp/bad.om \
+            '{source: $src, lang: "omega", options: {userArguments: "", filters: {binary: true, execute: true}, compilerOptions: {}}}' \
+            > /tmp/bad.json
+          curl -fs -H 'Content-Type: application/json' -H 'Accept: application/json' \
+            -d @/tmp/bad.json http://127.0.0.1:10240/api/compiler/omc/compile > /tmp/bad.out
+          jq '{code, stderr, asm: [.asm[].text], didExecute: .execResult.didExecute}' /tmp/bad.out
+          test "$(jq '.code' /tmp/bad.out)" = 3
+          test "$(jq -r '.stderr[0].text' /tmp/bad.out)" = 'omc: line 2: error 3'
+          test "$(jq '.stderr[0].tag.line' /tmp/bad.out)" = 2
+          test "$(jq '.execResult.didExecute // false' /tmp/bad.out)" = false
+      - name: Negative control - wrong program output is detected
+        run: |
+          sed 's/sumsq 10$/sumsq 9/' examples/omega/default.om > /tmp/wrong.om
+          if cmp -s examples/omega/default.om /tmp/wrong.om; then exit 1; fi
+          jq -n --rawfile src /tmp/wrong.om \
+            '{source: $src, lang: "omega", options: {userArguments: "", filters: {binary: true, execute: true}, compilerOptions: {}}}' \
+            > /tmp/wrong.json
+          curl -fs -H 'Content-Type: application/json' -H 'Accept: application/json' \
+            -d @/tmp/wrong.json http://127.0.0.1:10240/api/compiler/omc/compile > /tmp/wrong.out
+          out="$(jq -r '[.execResult.stdout[].text] | join("\n")' /tmp/wrong.out)"
+          echo "stdout: $out"
+          test "$out" = 285
+      - name: Server log
+        if: always()
+        run: cat /tmp/ce.log

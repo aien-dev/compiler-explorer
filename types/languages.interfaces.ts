@@ -92,6 +92,7 @@ export type LanguageKey =
     | 'numba'
     | 'ocaml'
     | 'odin'
+    | 'omega'
     | 'objc'
     | 'objc++'
     | 'openclc'

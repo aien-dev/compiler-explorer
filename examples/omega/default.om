@@ -1,0 +1,34 @@
+note Sum of the squares 1..10, printed in decimal on stdout.
+global buf uchar 24
+fn square x ulong to ulong
+ret mul x x
+end
+fn sumsq n ulong to ulong
+s = ulong 0
+for i ulong n
+s = add s square add i 1
+end
+ret s
+end
+note A ulong has at most 20 decimal digits, so 20 passes always reach x = 0.
+fn putdec v ulong to long
+p = ulong 23
+put buf p uchar 10
+x = v
+while true bound 20
+p = sub p 1
+put buf p uchar add rem x 10 48
+x = div x 10
+if eq x 0
+break
+end
+end
+ret write int 1 buf p sub 24 p
+end
+fn main to int
+r = putdec sumsq 10
+if lt r 0
+ret 1
+end
+ret 0
+end

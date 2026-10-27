@@ -820,6 +820,17 @@ const definitions: Record<LanguageKey, LanguageDefinition> = {
         previewFilter: null,
         monacoDisassembly: null,
     },
+    omega: {
+        name: 'Omega',
+        monaco: 'omega',
+        extensions: ['.om'],
+        alias: [],
+        logoFilename: null,
+        logoFilenameDark: null,
+        formatter: null,
+        previewFilter: null,
+        monacoDisassembly: null,
+    },
     openclc: {
         name: 'OpenCL C',
         monaco: 'openclc',

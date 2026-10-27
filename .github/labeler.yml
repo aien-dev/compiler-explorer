@@ -360,6 +360,14 @@
           - 'etc/config/odin.*.properties'
           - 'static/modes/odin-mode.ts'
 
+'lang-omega':
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'lib/compilers/omega.ts'
+          - 'etc/config/omega.*.properties'
+          - 'static/modes/omega-mode.ts'
+          - 'examples/omega/**'
+
 'lang-opencl-c':
   - changed-files:
       - any-glob-to-any-file:

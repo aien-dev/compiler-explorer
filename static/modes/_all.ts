@@ -68,6 +68,7 @@ import './nim-mode';
 import './nix-mode';
 import './ocaml-mode';
 import './odin-mode';
+import './omega-mode';
 import './openclc-mode';
 import './ptx-mode';
 import './perl-concise-mode';
